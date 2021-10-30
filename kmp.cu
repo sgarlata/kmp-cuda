@@ -26,7 +26,7 @@ void computeNext(int *next, char *pattern, int m) {
     ++t;
     ++j;
 
-    if (pattern[j] = pattern[t])
+    if (pattern[j] == pattern[t])
       next[j] = next[t];
     else
       next[j] = t;
@@ -45,6 +45,8 @@ void patternMatch(char *pattern, char *text, int *next, int m, int n) {
 
   if (j == m)
     printf("Match found in positions %d through %d.\n", k - m, k - 1);
+  else
+    printf("No match found.\n");
 }
 
 int main() {
