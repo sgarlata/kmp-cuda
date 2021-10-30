@@ -38,7 +38,7 @@ void patternMatch(char *pattern, char *text, int *next, int m, int n) {
   int k; // current position in text
 
   for (j = 0, k = 0; j < m && k < n; ++j, ++k) {
-    while (j > 0 && text[k] != pattern[j]) {
+    while (j >= 0 && text[k] != pattern[j]) {
       j = next[j];
     }
   }
