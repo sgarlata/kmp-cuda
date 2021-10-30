@@ -1,6 +1,6 @@
 /*
 CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
-VERSION: JUST USING THE CPU
+VERSION: ONLY USING THE CPU
 */
 
 #include <stdio.h>
@@ -18,9 +18,9 @@ inline cudaError_t checkCuda(cudaError_t result)
 
 void computeNext(int *next, char *pattern, int m) {
   int j = 1, t = 0;
-  next[0] = 0;
+  next[0] = -1;
 
-  while (j < m - 1) {
+  while (j < m) {
     while (t > 0 && pattern[j] != pattern[t])
       t = next[t];
     ++t;
@@ -43,8 +43,8 @@ void patternMatch(char *pattern, char *text, int *next, int m, int n) {
     }
   }
 
-  if (j >= m)
-    printf("Match found in positions %d through %d.\n", k - m + 1, k);
+  if (j == m)
+    printf("Match found in positions %d through %d.\n", k - m, k - 1);
 }
 
 int main() {
