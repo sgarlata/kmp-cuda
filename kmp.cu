@@ -1,11 +1,14 @@
 /*
 CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
-VERSION: ONLY USING THE CPU
+VERSION: USING ALSO THE GPU (NOT POLISHED)
 */
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <assert.h>
+
+__managed__ int noMatch = 1;
 
 inline cudaError_t checkCuda(cudaError_t result)
 {
@@ -33,25 +36,39 @@ void computeNext(int *next, char *pattern, int m) {
   }
 }
 
-void patternMatch(char *pattern, char *text, int *next, int m, int n) {
+__global__ void patternMatch(char *pattern, char *text, int *next, int m, int n) {
   int j; // current position in pattern
   int k; // current position in text
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  int sublength = ceilf( (float) n / (gridDim.x * blockDim.x));
+  int start = idx * sublength;
+  int stop = start + sublength;
+  int proceed = 1;
 
-  for (j = 0, k = 0; j < m && k < n; ++j, ++k) {
+    printf("Thread: %d. Start: %d. Stop: %d.\n", idx, start, stop);
+
+  for (j = 0, k = start; j < m && k < n && proceed; ++j, ++k) {
+    //printf("Thread: %d. Inside for with j = %d and k = %d\n", idx, j, k);
     while (j >= 0 && text[k] != pattern[j]) {
+      //printf("Thread: %d. Inside while with j = %d and k = %d\n", idx, j, k);
       j = next[j];
+      //printf("Thread: %d. j is now %d\n", idx, j);
+      if (k - j >= stop) {
+      //printf("Thread: %d. Inside if with k = %d.\n", idx, k);
+        proceed = 0;
+        }
     }
   }
 
-  if (j == m)
-    printf("Match found in positions %d through %d.\n", k - m, k - 1);
-  else
-    printf("No match found.\n");
+    if (j == m) {
+      noMatch = 0;
+      printf("Match found by thread n. %d in positions %d through %d.\n", idx, k - m, k - 1);
+    }
 }
 
 int main() {
-    const int N = 27; // dimension of text
-    const int M = 4; // dimension of pattern
+    const int N = 26; // dimension of text
+    const int M = 10; // dimension of pattern
     char *text, *pattern;
     int *next;
 
@@ -63,15 +80,21 @@ int main() {
     checkCuda(cudaMallocManaged(&pattern, pattern_size));
     checkCuda(cudaMallocManaged(&next, next_size));
 
-    strncpy(text, "this is a trial to try this", 27);
-    strncpy(pattern, "this", 4);
+    strncpy(text, "babcbabcabcaabcabcabcacabc", 26);
+    strncpy(pattern, "abcabcacab", 10);
+
+    size_t threads_per_block = 4;
+    size_t number_of_blocks = 2;
 
     computeNext(next, pattern, M);
-    patternMatch(pattern, text, next, M, N);
+    patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, M, N);
 
     checkCuda(cudaGetLastError());
     checkCuda(cudaDeviceSynchronize());
 
+    if (noMatch)
+      printf("No match found.\n");
+      
     checkCuda(cudaFree(text));
     checkCuda(cudaFree(pattern));
 
