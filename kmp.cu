@@ -8,7 +8,9 @@ VERSION: USING ALSO THE GPU (NOT POLISHED)
 #include <math.h>
 #include <assert.h>
 
-__managed__ int noMatch = 1;
+#define MAX 50
+
+__managed__ int match = 0;
 
 inline cudaError_t checkCuda(cudaError_t result)
 {
@@ -45,7 +47,7 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int m, int n)
   int stop = start + sublength;
   int proceed = 1;
 
-    printf("Thread: %d. Start: %d. Stop: %d.\n", idx, start, stop);
+  printf("Thread: %d. Start: %d. Stop: %d.\n", idx, start, stop);
 
   for (j = 0, k = start; j < m && k < n && proceed; ++j, ++k) {
     //printf("Thread: %d. Inside for with j = %d and k = %d\n", idx, j, k);
@@ -61,42 +63,54 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int m, int n)
   }
 
     if (j == m) {
-      noMatch = 0;
+      match = 1;
       printf("Match found by thread n. %d in positions %d through %d.\n", idx, k - m, k - 1);
     }
 }
 
+int kmp(char *text, char *pattern, int N, int M) {
+  int *next;
+  size_t next_size = M * sizeof(int);
+
+  checkCuda(cudaMallocManaged(&next, next_size));
+  computeNext(next, pattern, M);
+
+  size_t threads_per_block = 4;
+  size_t number_of_blocks = 2;
+
+  patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, M, N);
+  checkCuda(cudaGetLastError());
+  
+  checkCuda(cudaDeviceSynchronize());
+
+  return match;
+};
+
 int main() {
-    const int N = 26; // dimension of text
-    const int M = 10; // dimension of pattern
-    char *text, *pattern;
-    int *next;
+  char buffer[MAX+1], *text, *pattern;
+  int N, M;
 
-    size_t text_size = (N + 1) * sizeof(char);
-    size_t pattern_size = (M + 1) * sizeof(char);
-    size_t next_size = M * sizeof(int);
+  printf("Enter text (at most %d characters): ", MAX);
+  fgets(buffer, MAX+1, stdin);
+  buffer[strcspn(buffer, "\n")] = 0; // to remove \n
+  N = strlen(buffer);
+  size_t text_size = (N + 1) * sizeof(char);
+  checkCuda(cudaMallocManaged(&text, text_size));
+  strncpy(text, buffer, N);
 
-    checkCuda(cudaMallocManaged(&text, text_size));
-    checkCuda(cudaMallocManaged(&pattern, pattern_size));
-    checkCuda(cudaMallocManaged(&next, next_size));
+  printf("Enter pattern: (at most %d characters): ", MAX);
+  fgets(buffer, MAX+1, stdin);
+  buffer[strcspn(buffer, "\n")] = 0; // to remove \n
+  M = strlen(buffer);
+  size_t pattern_size = (M + 1) * sizeof(char);
+  checkCuda(cudaMallocManaged(&pattern, pattern_size));
+  strncpy(pattern, buffer, M);  
 
-    strncpy(text, "babcbabcabcaabcabcabcacabc", 26);
-    strncpy(pattern, "abcabcacab", 10);
+  if (!kmp(text, pattern, N, M))
+    printf("No match found.\n");
+    
+  checkCuda(cudaFree(text));
+  checkCuda(cudaFree(pattern));
 
-    size_t threads_per_block = 4;
-    size_t number_of_blocks = 2;
-
-    computeNext(next, pattern, M);
-    patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, M, N);
-
-    checkCuda(cudaGetLastError());
-    checkCuda(cudaDeviceSynchronize());
-
-    if (noMatch)
-      printf("No match found.\n");
-      
-    checkCuda(cudaFree(text));
-    checkCuda(cudaFree(pattern));
-
-    return 0;
+  return 0;
 }
