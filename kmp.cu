@@ -1,6 +1,5 @@
 /*
 CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
-VERSION: PARTIALLY POLISHED
 */
 
 #include <stdio.h>
@@ -50,7 +49,7 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int m, int n)
     while (j >= 0 && text[k] != pattern[j]) {
       j = next[j];
       if (k - j >= stop)
-        proceed = 0; // a match should only be found by a single thread, namely the one whose text's portion contains the initial matched character
+        proceed = 0; // a match should only be found by a single thread, namely the one whose text's portion contains the initial character of the matched sequence
     }
   }
 
@@ -60,7 +59,7 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int m, int n)
   }
 }
 
-int kmp(char *text, char *pattern, int N, int M) {
+void kmp(char *text, char *pattern, int N, int M) {
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
 
   checkCuda(cudaMallocManaged(&next, M * sizeof(int)));
@@ -73,9 +72,8 @@ int kmp(char *text, char *pattern, int N, int M) {
   checkCuda(cudaGetLastError());
   
   checkCuda(cudaDeviceSynchronize());
-
-  return match;
-};
+  checkCuda(cudaFree(next));
+}
 
 int main() {
   char buffer[MAX+1], *text, *pattern;
@@ -95,7 +93,9 @@ int main() {
   checkCuda(cudaMallocManaged(&pattern, (M + 1) * sizeof(char)));
   strncpy(pattern, buffer, M);  
 
-  if (!kmp(text, pattern, N, M))
+  kmp(text, pattern, N, M);
+
+  if (!match)
     printf("No match found.\n");
     
   checkCuda(cudaFree(text));
