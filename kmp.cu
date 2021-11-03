@@ -19,11 +19,11 @@ inline cudaError_t checkCuda(cudaError_t result)
   return result;
 }
 
-void computeNext(int *next, char *pattern, int m) {
+void computeNext(int *next, char *pattern, int M) {
   int j = 1, t = 0;
   next[0] = -1;
 
-  while (j < m) {
+  while (j < M) {
     while (t > 0 && pattern[j] != pattern[t])
       t = next[t];
     ++t;
@@ -36,16 +36,16 @@ void computeNext(int *next, char *pattern, int m) {
   }
 }
 
-__global__ void patternMatch(char *pattern, char *text, int *next, int m, int n) {
+__global__ void patternMatch(char *pattern, char *text, int *next, int *matchedText, int M, int N) {
   int j; // current position in pattern
   int k; // current position in text
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
-  int sublength = ceilf( (float) n / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
+  int sublength = ceilf( (float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
   int proceed = 1;
 
-  for (j = 0, k = start; j < m && k < n && proceed; ++j, ++k) {
+  for (j = 0, k = start; j < M && k < N && proceed; ++j, ++k) {
     while (j >= 0 && text[k] != pattern[j]) {
       j = next[j];
       if (k - j >= stop)
@@ -53,26 +53,42 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int m, int n)
     }
   }
 
-  if (j == m) {
+  if (j == M) {
     match = 1;
-    printf("Match found in positions %d through %d.\n", k - m, k - 1); // found matches are not necessarily printed in order
+    matchedText[k - M] = k - 1;
   }
 }
 
 void kmp(char *text, char *pattern, int N, int M) {
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
+  int *matchedText; // array to store the matched text's positions
+  int i; // used to loop
 
   checkCuda(cudaMallocManaged(&next, M * sizeof(int)));
   computeNext(next, pattern, M);
+
+  checkCuda(cudaMallocManaged(&matchedText, N * sizeof(int)));
+  for (i = 0; i < N; ++i)
+    matchedText[i] = -1;
   
   size_t threads_per_block = 4;
   size_t number_of_blocks = 2;
 
-  patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, M, N);
+  patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, matchedText, M, N);
   checkCuda(cudaGetLastError());
   
   checkCuda(cudaDeviceSynchronize());
+
   checkCuda(cudaFree(next));
+
+  if (!match)
+    printf("No match found.\n");
+  else {
+    printf("Match found in position(s):\n");
+    for (i = 0; i < N; ++i)
+      if (matchedText[i] != -1)
+        printf("- %d through %d\n", i, matchedText[i]);
+  }
 }
 
 int main() {
@@ -86,7 +102,7 @@ int main() {
   checkCuda(cudaMallocManaged(&text, (N + 1) * sizeof(char)));
   strncpy(text, buffer, N);
 
-  printf("Enter pattern: (at most %d characters): ", MAX);
+  printf("Enter pattern (at most %d characters): ", MAX);
   fgets(buffer, MAX+1, stdin);
   buffer[strcspn(buffer, "\n")] = 0; // to remove \n
   M = strlen(buffer);
@@ -94,9 +110,6 @@ int main() {
   strncpy(pattern, buffer, M);  
 
   kmp(text, pattern, N, M);
-
-  if (!match)
-    printf("No match found.\n");
     
   checkCuda(cudaFree(text));
   checkCuda(cudaFree(pattern));
