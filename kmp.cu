@@ -106,12 +106,16 @@ void kmp(char *text, char *pattern, int N, int M) {
   }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+  FILE *fp;
   char buffer[MAX+1], *text, *pattern;
   int N, M;
 
-  printf("Enter text (at most %d characters): ", MAX);
-  fgets(buffer, MAX+1, stdin);
+  fp = fopen(argv[1], "r");
+  if (fp == NULL)
+    return EXIT_FAILURE;
+  
+  fgets(buffer, MAX+1, fp);
   buffer[strcspn(buffer, "\n")] = 0; // to remove \n
   N = strlen(buffer);
   checkCuda(cudaMallocManaged(&text, (N + 1) * sizeof(char)));
