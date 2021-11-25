@@ -59,6 +59,19 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *matchedT
   }
 }
 
+int checkMatch(char *pattern, char *text, int M, int N, int start, int end) {
+  int check = 1;
+
+  if (end - start + 1 != M) // wrong length
+    check = 0;
+
+  for (int i = start; i < M && i <= end; ++i)
+    if (pattern[i] != text[i]) // wrong character
+      check = 0;
+
+  return check;
+}
+
 void kmp(char *text, char *pattern, int N, int M) {
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
   int *matchedText; // array to store the matched text's positions
@@ -86,8 +99,10 @@ void kmp(char *text, char *pattern, int N, int M) {
   else {
     printf("Match found in position(s):\n");
     for (i = 0; i < N; ++i)
-      if (matchedText[i] != -1)
-        printf("- %d through %d\n", i, matchedText[i]);
+      if (matchedText[i] != -1) {
+        if (checkMatch(pattern, text, M, N, i, matchedText[i]))
+          printf("• %d through %d\n", i, matchedText[i]);
+      }
   }
 }
 
@@ -107,7 +122,7 @@ int main() {
   buffer[strcspn(buffer, "\n")] = 0; // to remove \n
   M = strlen(buffer);
   checkCuda(cudaMallocManaged(&pattern, (M + 1) * sizeof(char)));
-  strncpy(pattern, buffer, M);  
+  strncpy(pattern, buffer, M);
 
   kmp(text, pattern, N, M);
     
