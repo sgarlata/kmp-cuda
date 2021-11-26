@@ -1,5 +1,11 @@
 /*
 CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
+
+THIS VERSION CAN READ THE INPUT TEXT FROM A FILE.
+THE CURRENT APPROACH IS TO WORK LINE BY LINE.
+AN ALTERNATIVE ONE COULD BE TO CONCATENATE ALL THE LINES
+AND THEN WORK AS BEFORE ON THE RESULTING SINGLE BIG STRING.
+TODO: FIGURE OUT WHICH IS THE BEST APPROACH
 */
 
 #include <stdio.h>
@@ -8,7 +14,7 @@ CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
 
 #define MAX 50
 
-__managed__ int match = 0;
+__managed__ int match = 0; // to know whether at least a match in the whole file was found
 
 inline cudaError_t checkCuda(cudaError_t result)
 {
@@ -53,7 +59,7 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *matchedT
     }
   }
 
-  if (j == M) {
+  if (j == M) { // a match was found
     match = 1;
     matchedText[k - M] = k - 1;
   }
@@ -72,7 +78,7 @@ int checkMatch(char *pattern, char *text, int M, int N, int start, int end) {
   return check;
 }
 
-void kmp(char *text, char *pattern, int N, int M) {
+void kmp(char *text, char *pattern, int N, int M, int line) {
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
   int *matchedText; // array to store the matched text's positions
   int i; // used to loop
@@ -94,44 +100,48 @@ void kmp(char *text, char *pattern, int N, int M) {
 
   checkCuda(cudaFree(next));
 
-  if (!match)
-    printf("No match found.\n");
-  else {
-    printf("Match found in position(s):\n");
-    for (i = 0; i < N; ++i)
-      if (matchedText[i] != -1) {
-        if (checkMatch(pattern, text, M, N, i, matchedText[i]))
-          printf("• %d through %d\n", i, matchedText[i]);
-      }
-  }
+  for (i = 0; i < N; ++i)
+    if (matchedText[i] != -1)
+      if (checkMatch(pattern, text, M, N, i, matchedText[i])) // we check the match for correctness
+        printf("Match found on line %d from position %d through %d\n", line, i + 1, matchedText[i] + 1);
 }
 
 int main(int argc, char *argv[]) {
   FILE *fp;
   char buffer[MAX+1], *text, *pattern;
-  int N, M;
+  int N, M, line;
+
+  if (argc < 3) {
+    printf("You must provide the name of the text file as the first argument and the pattern as the second one\n");
+    return EXIT_FAILURE;
+  }
 
   fp = fopen(argv[1], "r");
-  if (fp == NULL)
+  if (fp == NULL) {
+    printf("Error with file\n");
     return EXIT_FAILURE;
-  
-  fgets(buffer, MAX+1, fp);
-  buffer[strcspn(buffer, "\n")] = 0; // to remove \n
-  N = strlen(buffer);
-  checkCuda(cudaMallocManaged(&text, (N + 1) * sizeof(char)));
-  strncpy(text, buffer, N);
+  }
 
-  printf("Enter pattern (at most %d characters): ", MAX);
-  fgets(buffer, MAX+1, stdin);
-  buffer[strcspn(buffer, "\n")] = 0; // to remove \n
-  M = strlen(buffer);
+  M = strlen(argv[2]);
   checkCuda(cudaMallocManaged(&pattern, (M + 1) * sizeof(char)));
-  strncpy(pattern, buffer, M);
+  strncpy(pattern, argv[2], M);
 
-  kmp(text, pattern, N, M);
+  line = 0;
+  while (fgets(buffer, MAX+1, fp) != NULL) { // we apply kmp to each line of the file
+    buffer[strcspn(buffer, "\n")] = 0; // to remove \n
+    N = strlen(buffer);
+    checkCuda(cudaMallocManaged(&text, (N + 1) * sizeof(char)));
+    strncpy(text, buffer, N);
+
+    kmp(text, pattern, N, M, ++line);
     
-  checkCuda(cudaFree(text));
+    checkCuda(cudaFree(text));
+  }
+
   checkCuda(cudaFree(pattern));
+
+  if (!match)
+    printf("No match was found.\n");
 
   return 0;
 }
