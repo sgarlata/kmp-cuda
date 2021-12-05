@@ -49,33 +49,21 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *matchedT
   int sublength = ceilf( (float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
-  int proceed = 1;
 
-  for (j = 0, k = start; j < M && k < N && proceed; ++j, ++k) {
+  for (j = 0, k = start; k < N && (k - j < stop); ++j, ++k) {
+    //printf ("Inside for with j = %d and k = %d\n", j, k);
+
     while (j >= 0 && text[k] != pattern[j]) {
+      //printf ("Inside while with j = %d and next[j] = %d\n", j, next[j]);
       j = next[j];
-      if (k - j >= stop)
-        proceed = 0; // a match should only be found by a single thread, namely the one whose text's portion contains the initial character of the matched sequence
+    }
+
+    if (j == M - 1) { // a match was found ('M - 1' because j hasn't been incremented yet)
+      match = 1;
+      matchedText[k - M + 1] = k;
+      j = next[j - 1]; // resetting j
     }
   }
-
-  if (j == M) { // a match was found
-    match = 1;
-    matchedText[k - M] = k - 1;
-  }
-}
-
-int checkMatch(char *pattern, char *text, int M, int N, int start, int end) {
-  int check = 1;
-
-  if (end - start + 1 != M) // wrong length
-    check = 0;
-
-  for (int i = start; i < M && i <= end; ++i)
-    if (pattern[i] != text[i]) // wrong character
-      check = 0;
-
-  return check;
 }
 
 void kmp(char *text, char *pattern, int N, int M, int line) {
@@ -102,8 +90,7 @@ void kmp(char *text, char *pattern, int N, int M, int line) {
 
   for (i = 0; i < N; ++i)
     if (matchedText[i] != -1)
-      if (checkMatch(pattern, text, M, N, i, matchedText[i])) // we check the match for correctness
-        printf("Match found on line %d from position %d through %d\n", line, i + 1, matchedText[i] + 1);
+      printf("Match found on line %d from position %d through %d\n", line, i + 1, matchedText[i] + 1);
 }
 
 int main(int argc, char *argv[]) {
