@@ -50,8 +50,50 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *matchedT
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
   int proceed = 1;
+  
+  char a = pattern[0];
+  pattern[M] = '@'; // M + 1 in allocation
+  next[M] = -1; // MAYBE -2
+  text[N] = '⊥';
+  text[N + 1] = a; // N + 2 in allocation
 
-  for (j = 0, k = start; j < M && k < N && proceed; ++j, ++k) {
+  j = 0;
+  k = start;
+
+  GetStarted: // j == 0
+    while (text[k] != a) {
+      ++k;
+    }
+    if (k >= N)
+      return;
+      //goto InputExhausted;
+
+  CharMatched:
+    ++j;
+    ++k;
+
+  Loop: // j >= 0
+    if (text[k] == pattern[j])
+      goto CharMatched;
+    j = next[j];
+    if (j == 0)
+      goto GetStarted;
+    if (j == -1) {
+      j = 0;
+      ++k;
+      goto GetStarted;
+    }
+    if (j >= 0)
+      goto Loop;
+    // text[k- m] through text[k- 1] matched
+    
+  if (j == M) { // a match was found
+  match = 1;
+  matchedText[k - M] = k - 1;
+  }
+  
+
+  /* for (j = 0, k = start; j < M && k < N && proceed; ++j, ++k) {
     while (j >= 0 && text[k] != pattern[j]) {
       j = next[j];
       if (k - j >= stop)
@@ -62,7 +104,7 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *matchedT
   if (j == M) { // a match was found
     match = 1;
     matchedText[k - M] = k - 1;
-  }
+  }*/
 }
 
 int checkMatch(char *pattern, char *text, int M, int N, int start, int end) {
