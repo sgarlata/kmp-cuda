@@ -1,23 +1,19 @@
 /*
 CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
 
-THIS VERSION CAN READ THE INPUT TEXT FROM A FILE.
-THE CURRENT APPROACH IS TO WORK LINE BY LINE.
-AN ALTERNATIVE ONE COULD BE TO CONCATENATE ALL THE LINES
-AND THEN WORK AS BEFORE ON THE RESULTING SINGLE BIG STRING.
-TODO: FIGURE OUT WHICH IS THE BEST APPROACH
+THIS VERSION CHECKS RESULTS FOR CORRECTNESS COMPARING THEM TO THE ONES OF THE NAIVE ALGORITHM
 */
 
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 
-#define MAX 50
+#define MAX 100
 
 __managed__ int match = 0; // to know whether at least a match in the whole file was found
 
-inline cudaError_t checkCuda(cudaError_t result)
-{
+// Utility to check for CUDA errors
+inline cudaError_t checkCuda(cudaError_t result) {
   if (result != cudaSuccess) {
     fprintf(stderr, "CUDA Runtime Error: %s\n", cudaGetErrorString(result));
     assert(result == cudaSuccess);
@@ -25,6 +21,18 @@ inline cudaError_t checkCuda(cudaError_t result)
   return result;
 }
 
+// Naive algorithm to be used as baseline to check for correctness
+void naiveSearch(char *text, char *pattern, int N, int M, int* naiveResult) {
+  for (int i = 0; i <= N - M; ++i) {
+    int j;
+    for (j = 0; j < M && text[i + j] == pattern[j]; ++j);
+
+    if (j == M) // match found from i to i + M - 1
+      naiveResult[i] = i + M - 1;
+  }
+}
+
+// To compute the auxiliary array which serves as a "failure table"
 void computeNext(int *next, char *pattern, int M) {
   int j = 1, t = 0;
   next[0] = -1;
@@ -42,55 +50,69 @@ void computeNext(int *next, char *pattern, int M) {
   }
 }
 
-__global__ void patternMatch(char *pattern, char *text, int *next, int *matchedText, int M, int N) {
+// Core of the KMP algorithm, separated from the 'kmp' wrapper function to be assigned to each thread
+__global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResult, int M, int N) {
   int j; // current position in pattern
   int k; // current position in text
-  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  int idx = threadIdx.x + blockIdx.x * blockDim.x; // thread's identifier
   int sublength = ceilf( (float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
 
   for (j = 0, k = start; k < N && (k - j < stop); ++j, ++k) {
-    //printf ("Inside for with j = %d and k = %d\n", j, k);
-
-    while (j >= 0 && text[k] != pattern[j]) {
-      //printf ("Inside while with j = %d and next[j] = %d\n", j, next[j]);
+    while (j >= 0 && text[k] != pattern[j])
       j = next[j];
-    }
 
     if (j == M - 1) { // a match was found ('M - 1' because j hasn't been incremented yet)
       match = 1;
-      matchedText[k - M + 1] = k;
-      j = next[j - 1]; // resetting j
+      kmpResult[k - M + 1] = k; // match found from k - M + 1 to k
+      j = next[j - 1]; // to reset j
     }
   }
 }
 
+// Wrapper
 void kmp(char *text, char *pattern, int N, int M, int line) {
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
-  int *matchedText; // array to store the matched text's positions
-  int i; // used to loop
+  int *kmpResult; // array to store the matched text's positions by KMP
+  int *naiveResult; // array to store the matched text's positions by the naive algorithm
+  int verified = 1; // flag to verify the result with respect to the naive algorithm
 
   checkCuda(cudaMallocManaged(&next, M * sizeof(int)));
   computeNext(next, pattern, M);
 
-  checkCuda(cudaMallocManaged(&matchedText, N * sizeof(int)));
-  for (i = 0; i < N; ++i)
-    matchedText[i] = -1;
+  checkCuda(cudaMallocManaged(&kmpResult, N * sizeof(int)));
+  naiveResult = (int *)malloc(N * sizeof(int));
+  for (int i = 0; i < N; ++i) {
+    kmpResult[i] = -1;
+    naiveResult[i] = -1;
+  }
   
   size_t threads_per_block = 4;
   size_t number_of_blocks = 2;
 
-  patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, matchedText, M, N);
+  patternMatch<<<number_of_blocks, threads_per_block>>> (pattern, text, next, kmpResult, M, N);
   checkCuda(cudaGetLastError());
   
   checkCuda(cudaDeviceSynchronize());
 
   checkCuda(cudaFree(next));
 
-  for (i = 0; i < N; ++i)
-    if (matchedText[i] != -1)
-      printf("Match found on line %d from position %d through %d\n", line, i + 1, matchedText[i] + 1);
+  naiveSearch(text, pattern, N, M, naiveResult);
+
+  for (int i = 0; i < N; ++i)
+    if (kmpResult[i] != naiveResult[i])
+      verified = 0;
+  
+  if (!verified)
+    printf ("Results for line %d are not correct.\n", line);
+
+  for (int i = 0; i < N; ++i)
+    if (kmpResult[i] != -1 && naiveResult[i] != -1 && kmpResult[i] == naiveResult[i])
+      printf ("Match found on line %d from position %d through %d\n", line, i + 1, kmpResult[i] + 1);
+  
+  checkCuda(cudaFree(kmpResult));
+  free(naiveResult);
 }
 
 int main(int argc, char *argv[]) {
@@ -99,7 +121,7 @@ int main(int argc, char *argv[]) {
   int N, M, line;
 
   if (argc < 3) {
-    printf("You must provide the name of the text file as the first argument and the pattern as the second one\n");
+    printf ("Provide the name of the text file as the first argument and the pattern to search as the second one.\n");
     return EXIT_FAILURE;
   }
 
@@ -128,7 +150,7 @@ int main(int argc, char *argv[]) {
   checkCuda(cudaFree(pattern));
 
   if (!match)
-    printf("No match was found.\n");
+    printf ("No match found.\n");
 
   return 0;
 }
