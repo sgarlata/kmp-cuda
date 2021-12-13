@@ -32,13 +32,13 @@ void naiveSearch(char *text, char *pattern, int N, int M, int* naiveResult) {
   }
 }
 
-// To compute the auxiliary array which serves as a "failure table"
+// To compute the auxiliary array which serves as "failure table"
 void computeNext(int *next, char *pattern, int M) {
-  int j = 1, t = 0;
-  next[0] = -1;
+  int j = 0, t = -1;
+  next[0] = -1; // next[j] = -1 means that we are to slide the pattern all the way past the current text character
 
-  while (j < M) {
-    while (t > 0 && pattern[j] != pattern[t])
+  while (j < M - 1) {
+    while (t >= 0 && pattern[j] != pattern[t])
       t = next[t];
     ++t;
     ++j;
@@ -50,7 +50,7 @@ void computeNext(int *next, char *pattern, int M) {
   }
 }
 
-// Core of the KMP algorithm, separated from the 'kmp' wrapper function to be assigned to each thread
+// Core of the KMP algorithm, separated from the 'kmp' wrapper function in order to be assignable to each thread
 __global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResult, int M, int N) {
   int j; // current position in pattern
   int k; // current position in text
@@ -59,13 +59,19 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResul
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
 
-  for (j = 0, k = start; k < N && (k - j < stop); ++j, ++k) {
+  j = 0;
+  k = start;
+
+  while (k < N && (k - j < stop)) {
     while (j >= 0 && text[k] != pattern[j])
       j = next[j];
+    
+    ++j;
+    ++k;
 
-    if (j == M - 1) { // a match was found ('M - 1' because j hasn't been incremented yet)
+    if (j == M) { // a match was found
       match = 1;
-      kmpResult[k - M + 1] = k; // match found from k - M + 1 to k
+      kmpResult[k - M] = k - 1; // match found from k - M to k - 1
       j = next[j - 1]; // to reset j
     }
   }
