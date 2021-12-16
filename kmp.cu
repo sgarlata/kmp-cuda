@@ -49,7 +49,7 @@ void computeNext(int *next, char *pattern, int M) {
 }
 
 // Core of the KMP algorithm, separated from the 'kmp' wrapper function in order to be assignable to each thread
-__global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResult, int M, int N, int *countPerThread) {
+__global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResult, int M, int N) {
   int j; // current position in pattern
   int k; // current position in text
   int idx = threadIdx.x + blockIdx.x * blockDim.x; // thread's identifier
@@ -68,7 +68,6 @@ __global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResul
     ++k;
 
     if (j == M) { // a match was found
-      ++countPerThread[idx];
       kmpResult[k - M] = 1; // match found from k - M to k - 1
       j = next[j]; // to reset j
     }
@@ -80,7 +79,6 @@ void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified,
   int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
   int *kmpResult; // array to store the matched text's positions by KMP
   int *naiveResult; // array to store the matched text's positions by the naive algorithm
-  int *countPerThread; // array with as many cells as threads to store the number of matches found by each of them
 
   checkCuda(cudaMallocManaged(&next, M * sizeof(int)));
   computeNext(next, pattern, M);
@@ -94,28 +92,21 @@ void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified,
   
   size_t numberOfBlocks = 2;
   size_t threadsPerBlock = 4;
-  size_t threadsInGrid = numberOfBlocks * threadsPerBlock; 
 
-  checkCuda(cudaMallocManaged(&countPerThread, threadsInGrid * sizeof(int)));
-  for (int i = 0; i < threadsInGrid; ++i)
-    countPerThread[i] = 0;
-
-  patternMatch<<<numberOfBlocks, threadsPerBlock>>> (pattern, text, next, kmpResult, M, N, countPerThread);
+  patternMatch<<<numberOfBlocks, threadsPerBlock>>> (pattern, text, next, kmpResult, M, N);
   checkCuda(cudaGetLastError());
   
   checkCuda(cudaDeviceSynchronize());
 
-  for (int i = 0; i < threadsInGrid; ++i)
-    (*onLineVerified) += countPerThread[i];
-
   checkCuda(cudaFree(next));
-  checkCuda(cudaFree(countPerThread));
 
   naiveSearch(text, pattern, N, M, naiveResult);
 
   for (int i = 0; i < N; ++i) {
-    if (naiveResult[i] == 1 && kmpResult[i] == 1) // by both naive and kmp
+    if (naiveResult[i] == 1 && kmpResult[i] == 1) { // by both naive and kmp
       printf ("Verified match on line %d from positions %d through %d\n", line, i + 1, i + M);
+      ++(*onLineVerified);
+    }
     else if (naiveResult[i] == 1 && kmpResult[i] == 0) { // by naive only
       printf ("Missed match on line %d from positions %d through %d\n", line, i + 1, i + M);
       ++(*onLineMissed);
