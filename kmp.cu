@@ -8,8 +8,6 @@ CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
 
 #define MAX 256
 
-__managed__ int match = 0; // to know whether at least a match in the whole file was found
-
 // Utility to check for CUDA errors
 inline cudaError_t checkCuda(cudaError_t result) {
   if (result != cudaSuccess) {
@@ -31,57 +29,59 @@ void naiveSearch(char *text, char *pattern, int N, int M, int* naiveResult) {
 }
 
 // To compute the auxiliary array which serves as "failure table"
-void computeNext(int *next, char *pattern, int M) {
-  int j = 0, t = -1;
-  next[0] = -1; // next[j] = -1 means that we are to slide the pattern all the way past the current text character
+void computeF(int *f, char *pattern, int M) {
+  int j = 0, i = 1;
+  f[0] = 0;
 
-  while (j < M - 1) {
-    while (t >= 0 && pattern[j] != pattern[t])
-      t = next[t];
-    ++t;
-    ++j;
-
-    if (pattern[j] == pattern[t])
-      next[j] = next[t];
-    else
-      next[j] = t;
+  while (i < M) {
+    if (pattern[i] == pattern[j])
+      f[i++] = ++j;
+    else {
+      if (j == 0)
+        f[i++] = 0;
+      else
+        j = f[j - 1];
+    }
   }
 }
 
 // Core of the KMP algorithm, separated from the 'kmp' wrapper function in order to be assignable to each thread
-__global__ void patternMatch(char *pattern, char *text, int *next, int *kmpResult, int M, int N) {
-  int j; // current position in pattern
-  int k; // current position in text
+__global__ void patternMatch(char *pattern, char *text, int *f, int *kmpResult, int M, int N) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x; // thread's identifier
   int sublength = ceilf( (float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
 
-  j = 0;
-  k = start;
+  int i = start; // index for text
+  int j = 0; // index for pattern
 
-  while (k < N && (k - j < stop)) {
-    while (j >= 0 && text[k] != pattern[j])
-      j = next[j];
-    
-    ++j;
-    ++k;
+  while (i < N && (i - j < stop)) {
+    if (pattern[j] == text[i]) {
+      ++j;
+      ++i;
+    }
 
-    if (j == M) { // a match was found
-      kmpResult[k - M] = 1; // match found from k - M to k - 1
-      j = next[j]; // to reset j
+    if (j == M) {
+      kmpResult[i - M] = 1; // match found from i - M to i - 1
+      j = f[j - 1];
+    }
+    else if (i < N && (i - j < stop) && pattern[j] != text[i]) {
+      if (j == 0)
+        ++i;
+      else
+        j = f[j - 1];
     }
   }
 }
 
 // Wrapper
 void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified, int *onLineMissed) {
-  int *next; // auxiliary array to know how far to slide the pattern when a mismatch is detected
+  int *f; // auxiliary array to know how far to slide the pattern when a mismatch is detected
   int *kmpResult; // array to store the matched text's positions by KMP
   int *naiveResult; // array to store the matched text's positions by the naive algorithm
 
-  checkCuda(cudaMallocManaged(&next, M * sizeof(int)));
-  computeNext(next, pattern, M);
+  checkCuda(cudaMallocManaged(&f, M * sizeof(int)));
+  computeF(f, pattern, M);
 
   checkCuda(cudaMallocManaged(&kmpResult, N * sizeof(int)));
   naiveResult = (int *)malloc(N * sizeof(int));
@@ -93,12 +93,12 @@ void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified,
   size_t numberOfBlocks = 2;
   size_t threadsPerBlock = 4;
 
-  patternMatch<<<numberOfBlocks, threadsPerBlock>>> (pattern, text, next, kmpResult, M, N);
+  patternMatch<<<numberOfBlocks, threadsPerBlock>>> (pattern, text, f, kmpResult, M, N);
   checkCuda(cudaGetLastError());
   
   checkCuda(cudaDeviceSynchronize());
 
-  checkCuda(cudaFree(next));
+  checkCuda(cudaFree(f));
 
   naiveSearch(text, pattern, N, M, naiveResult);
 
@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
 
   fp = fopen(argv[1], "r");
   if (fp == NULL) {
-    printf("Error with file\n");
+    printf("Error with file.\n");
     return EXIT_FAILURE;
   }
 
