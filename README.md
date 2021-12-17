@@ -16,5 +16,7 @@ Clone the repository.
 
 ## Result
 The program shows at which positions of a given line of the text the pattern has been found.
+
 Each match is verified by being also found by the naive algorithm for pattern searching.
+
 Finally, the total number of verified matches is shown, possibly together with the the number of missed matches (i.e., those found by the naive algorithm, but not by the KMP one).
