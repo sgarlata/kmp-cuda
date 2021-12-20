@@ -1,6 +1,5 @@
 # KMP with CUDA
 A simple implementation of the KMP algorithm, which leverages GPU's power to parallelize the search of a given pattern within a text.
-> **Note:** For simplicity's sake, it uses 2 blocks of 4 threads each. Clearly, these numbers do not affect the program's outcome.
 
 ## Requirements
 - A CUDA-capable GPU
