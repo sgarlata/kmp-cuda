@@ -6,7 +6,7 @@ CUDA-BASED IMPLEMENTATION OF THE KMP ALGORITHM
 #include <string.h>
 #include <assert.h>
 
-#define MAX 256
+#define MAX 1024
 
 // Utility to check for CUDA errors
 inline cudaError_t checkCuda(cudaError_t result) {
@@ -48,7 +48,7 @@ void computeF(int *f, char *pattern, int M) {
 // Core of the KMP algorithm, separated from the 'kmp' wrapper function in order to be assignable to each thread
 __global__ void patternMatch(char *pattern, char *text, int *f, int *kmpResult, int M, int N) {
   int idx = threadIdx.x + blockIdx.x * blockDim.x; // thread's identifier
-  int sublength = ceilf( (float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
+  int sublength = ceilf((float) N / (gridDim.x * blockDim.x)); // text characters divided by the number of threads
   int start = idx * sublength; // initial delimiter for each thread (included)
   int stop = start + sublength; // final delimiter for each thread (excluded)
 
@@ -90,8 +90,8 @@ void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified,
     naiveResult[i] = 0;
   }
   
-  size_t numberOfBlocks = 2;
-  size_t threadsPerBlock = 4;
+  size_t threadsPerBlock = 32;
+  size_t numberOfBlocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
   patternMatch<<<numberOfBlocks, threadsPerBlock>>> (pattern, text, f, kmpResult, M, N);
   checkCuda(cudaGetLastError());
@@ -104,15 +104,15 @@ void kmp(char *text, char *pattern, int N, int M, int line, int *onLineVerified,
 
   for (int i = 0; i < N; ++i) {
     if (naiveResult[i] == 1 && kmpResult[i] == 1) { // by both naive and kmp
-      printf ("Verified match on line %d from positions %d through %d\n", line, i + 1, i + M);
+      printf ("Verified match on line %d starting at column %d\n", line, i + 1);
       ++(*onLineVerified);
     }
     else if (naiveResult[i] == 1 && kmpResult[i] == 0) { // by naive only
-      printf ("Missed match on line %d from positions %d through %d\n", line, i + 1, i + M);
+      printf ("Missed match on line %d starting at column %d\n", line, i + 1);
       ++(*onLineMissed);
     }
     else if (naiveResult[i] == 0 && kmpResult[i] == 1) { // by kmp only
-      printf ("Unverified match on line %d from positions %d through %d\n", line, i + 1, i + M);
+      printf ("Unverified match on line %d starting at column %d\n", line, i + 1);
       --(*onLineVerified);
     }
   }
